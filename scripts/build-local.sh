@@ -178,7 +178,7 @@ fi
 echo ""
 echo "Packaging extension..."
 cd extension
-vsce package --no-dependencies --allow-missing-repository --skip-license
+vsce package --no-dependencies --allow-missing-repository
 
 # Find the .vsix file
 VSIX_FILE=$(ls -t *.vsix 2>/dev/null | head -1)
