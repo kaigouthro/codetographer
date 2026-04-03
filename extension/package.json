@@ -146,8 +146,8 @@
     }
   },
   "scripts": {
-    "build": "tsup src/extension.ts src/analyzer/*.ts src/commands/*.ts --format cjs --out-dir dist --external vscode",
-    "watch": "tsup src/extension.ts src/analyzer/*.ts src/commands/*.ts --format cjs --out-dir dist --external vscode --watch"
+    "build": "tsup",
+    "watch": "tsup --watch"
   },
   "dependencies": {
     "@babel/parser": "^7.23.0",
