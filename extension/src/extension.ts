@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import { CGraphEditorProvider } from './cgraphEditorProvider';
+import {
+  generateCallGraphFromSelection,
+  analyzeCodebase,
+} from './commands/callGraphCommands';
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(CGraphEditorProvider.register(context));
@@ -29,6 +33,19 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('No .cgraph file is currently active');
       }
     })
+  );
+
+  // Command to generate call graph from current selection
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'codetographer.generateCallGraph',
+      generateCallGraphFromSelection
+    )
+  );
+
+  // Command to analyze entire codebase
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codetographer.analyzeCodebase', analyzeCodebase)
   );
 }
 

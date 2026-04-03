@@ -326,7 +326,7 @@ export class CGraphEditorProvider implements vscode.CustomTextEditorProvider {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource}; worker-src blob:; img-src ${webview.cspSource} data: blob:; font-src ${webview.cspSource} data:;">
   <link href="${styleUri}" rel="stylesheet">
   <title>Codetographer</title>
 </head>

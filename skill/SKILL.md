@@ -4,9 +4,13 @@ description: |
   Generates interactive code flow diagrams (.cgraph files).
   Invoke when users ask: "how does X work", "show me the flow of Y",
   "visualize the architecture", "diagram the data flow",
-  "create a graph of the codebase", or similar queries about
-  understanding code structure and relationships.
-version: "1.0.0"
+  "create a graph of the codebase", "analyze call graph", or similar queries
+  about understanding code structure and relationships.
+
+  The Codetographer extension now includes semantic analysis capabilities that can
+  automatically generate call graphs by analyzing actual code (JavaScript/TypeScript).
+  Users can generate call graphs from a selected function or analyze entire codebases.
+version: "1.1.0"
 ---
 
 # Codetographer Skill
@@ -15,6 +19,37 @@ version: "1.0.0"
 
 Generate `.cgraph` files that visualize code architecture and flow.
 These files can be viewed in VS Code with the Codetographer extension.
+
+**NEW:** The extension now includes automatic semantic analysis for JavaScript/TypeScript codebases.
+Users can generate call graphs automatically using VS Code commands without manual graph creation.
+
+## Two Modes of Operation
+
+### 1. Automatic Call Graph Generation (NEW)
+
+For JavaScript/TypeScript projects, users can now use built-in commands:
+
+- **Generate Call Graph from Selection**: Analyzes a specific function and generates a call graph
+  - Place cursor on a function name
+  - Run command: `Codetographer: Generate Call Graph from Selection`
+  - Automatically traces function calls up to configured depth
+
+- **Analyze Codebase Call Graph**: Analyzes the entire codebase
+  - Run command: `Codetographer: Analyze Codebase Call Graph`
+  - Generates a comprehensive call graph of the entire project
+  - Configurable file patterns and exclusions
+
+**Configuration options** (in VS Code settings):
+- `codetographer.analysis.maxDepth`: Maximum depth for call graph analysis (default: 3)
+- `codetographer.analysis.maxNodes`: Maximum number of nodes (default: 50)
+- `codetographer.analysis.includeNodeModules`: Include node_modules (default: false)
+- `codetographer.analysis.filePatterns`: File patterns to analyze
+- `codetographer.analysis.excludePatterns`: Patterns to exclude
+
+### 2. Manual Graph Creation (Original Method)
+
+For other languages or custom visualizations, you can still manually create `.cgraph` files
+as described below.
 
 ## When to Activate
 

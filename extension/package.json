@@ -1,8 +1,8 @@
 {
   "name": "codetographer",
   "displayName": "Codetographer",
-  "description": "Interactive code flow visualization with navigable graphs",
-  "version": "0.1.3",
+  "description": "Interactive code flow visualization with navigable graphs and semantic call graph analysis",
+  "version": "0.2.0",
   "publisher": "KelvinNewton",
   "icon": "icon.png",
   "license": "Apache-2.0",
@@ -17,9 +17,15 @@
   "keywords": [
     "visualization",
     "code-graph",
+    "call-graph",
     "architecture",
     "diagram",
-    "flow"
+    "flow",
+    "semantic-analysis",
+    "code-analysis",
+    "dependencies",
+    "javascript",
+    "typescript"
   ],
   "engines": {
     "vscode": "^1.85.0"
@@ -28,13 +34,27 @@
     "Visualization",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:codetographer.generateCallGraph",
+    "onCommand:codetographer.analyzeCodebase",
+    "onCustomEditor:codetographer.cgraphEditor"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "codetographer.openAsText",
         "title": "Open as JSON",
+        "category": "Codetographer"
+      },
+      {
+        "command": "codetographer.generateCallGraph",
+        "title": "Generate Call Graph from Selection",
+        "category": "Codetographer"
+      },
+      {
+        "command": "codetographer.analyzeCodebase",
+        "title": "Analyze Codebase Call Graph",
         "category": "Codetographer"
       }
     ],
@@ -77,13 +97,65 @@
         ],
         "configuration": "./language-configuration.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Codetographer",
+      "properties": {
+        "codetographer.analysis.maxDepth": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum depth for call graph analysis"
+        },
+        "codetographer.analysis.maxNodes": {
+          "type": "number",
+          "default": 50,
+          "minimum": 5,
+          "maximum": 200,
+          "description": "Maximum number of nodes in generated call graph"
+        },
+        "codetographer.analysis.includeNodeModules": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include calls to node_modules in the analysis"
+        },
+        "codetographer.analysis.filePatterns": {
+          "type": "array",
+          "default": [
+            "**/*.js",
+            "**/*.jsx",
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.mjs",
+            "**/*.cjs"
+          ],
+          "description": "File patterns to include in codebase analysis"
+        },
+        "codetographer.analysis.excludePatterns": {
+          "type": "array",
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.git/**"
+          ],
+          "description": "File patterns to exclude from analysis"
+        }
+      }
+    }
   },
   "scripts": {
-    "build": "tsup src/extension.ts --format cjs --out-dir dist --external vscode",
-    "watch": "tsup src/extension.ts --format cjs --out-dir dist --external vscode --watch"
+    "build": "tsup",
+    "watch": "tsup --watch"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "@babel/types": "^7.23.0"
   },
   "devDependencies": {
+    "@types/babel__traverse": "^7.20.0",
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
     "tsup": "^8.0.1",

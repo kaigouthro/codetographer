@@ -12,7 +12,9 @@ Understanding unfamiliar codebases is hard. You ask your AI "how does authentica
 
 Codetographer takes a different approach. Instead of text explanations, your AI generates an interactive visual map of the code flow. Each node in the graph represents a real function or class in your codebase, and clicking it takes you directly to that code.
 
-The workflow is simple: install the extension, give your AI assistant the skill file, then ask questions like you normally would. When you ask "how does X work?", you get a `.cgraph` file that opens as a navigable diagram.
+**NEW in v0.2.0:** Automatic semantic call graph generation for JavaScript/TypeScript! No need to manually create graphs - Codetographer can now analyze your codebase and automatically generate call graphs with configurable depth and scope.
+
+The workflow is simple: install the extension, give your AI assistant the skill file, then ask questions like you normally would. When you ask "how does X work?", you get a `.cgraph` file that opens as a navigable diagram. For JavaScript/TypeScript projects, you can also use built-in commands to automatically generate call graphs from any function.
 
 ## Getting Started
 
@@ -41,7 +43,32 @@ Use [`skill/SKILL.md`](skill/SKILL.md) as a prompt or system instruction. The sk
 
 ### Try it
 
-Once set up, ask your AI things like:
+Once set up, you have two ways to create call graphs:
+
+#### Option 1: Automatic Call Graph Generation (JavaScript/TypeScript)
+
+For JavaScript and TypeScript codebases, use the built-in semantic analyzer:
+
+1. **From a specific function:**
+   - Open a JS/TS file
+   - Place your cursor on a function name
+   - Open Command Palette (Cmd+Shift+P / Ctrl+Shift+P)
+   - Run: `Codetographer: Generate Call Graph from Selection`
+   - A `.cgraph` file will be created showing the call graph from that function
+
+2. **Entire codebase analysis:**
+   - Open Command Palette
+   - Run: `Codetographer: Analyze Codebase Call Graph`
+   - Analyzes all JS/TS files in your workspace
+   - Creates a comprehensive call graph
+
+**Configure the analyzer** in VS Code Settings:
+- Search for "Codetographer"
+- Adjust max depth, max nodes, file patterns, etc.
+
+#### Option 2: AI-Generated Graphs (All Languages)
+
+Ask your AI assistant questions like:
 
 - "How does user authentication work?"
 - "Show me the data flow for order processing"
@@ -77,6 +104,54 @@ When you Cmd+Click (Ctrl+Click) a node, the extension tells VS Code to open that
 | Drag | Pan around the graph |
 | Scroll / pinch | Zoom in and out |
 | Bottom-left controls | Zoom buttons, fit to view |
+
+## Automatic Semantic Analysis
+
+For JavaScript and TypeScript projects, Codetographer can automatically analyze your code to generate call graphs:
+
+### Features
+
+- **Function-level analysis**: Start from any function and trace its calls
+- **Configurable depth**: Control how deep the analysis goes (1-10 levels)
+- **Cross-file tracking**: Follows imports and exports across files
+- **Codebase-wide analysis**: Generate graphs for entire projects
+- **Smart filtering**: Exclude node_modules, dist, and other build artifacts
+
+### How It Works
+
+The semantic analyzer uses Babel to parse JavaScript/TypeScript files and extract:
+- Function declarations and expressions
+- Class methods and constructors
+- Arrow functions
+- Import/export relationships
+- Function calls and invocations
+
+It then builds a call graph by:
+1. Parsing all relevant files in your workspace
+2. Extracting function definitions and their calls
+3. Resolving imports to link functions across files
+4. Building a graph with configurable depth and node limits
+5. Converting to the `.cgraph` format for visualization
+
+### Configuration
+
+Available settings (search "Codetographer" in VS Code settings):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `codetographer.analysis.maxDepth` | 3 | Maximum depth for call graph traversal |
+| `codetographer.analysis.maxNodes` | 50 | Maximum number of nodes in the graph |
+| `codetographer.analysis.includeNodeModules` | false | Include calls to node_modules |
+| `codetographer.analysis.filePatterns` | `**/*.{js,jsx,ts,tsx}` | Files to analyze |
+| `codetographer.analysis.excludePatterns` | `**/node_modules/**`, etc. | Files to exclude |
+
+### Limitations
+
+- Currently supports JavaScript and TypeScript
+- Does not analyze dynamic calls (e.g., `fn[methodName]()`)
+- Does not follow calls through node_modules by default
+- Large codebases may need depth/node limits adjusted
+
 
 ## The .cgraph Format
 
