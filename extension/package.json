@@ -34,7 +34,11 @@
     "Visualization",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:codetographer.generateCallGraph",
+    "onCommand:codetographer.analyzeCodebase",
+    "onCustomEditor:codetographer.cgraphEditor"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [

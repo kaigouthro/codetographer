@@ -1,3 +1,8 @@
+export interface ImportInfo {
+  source: string; // module specifier (e.g. './utils' or 'lodash')
+  importedAs: string; // original exported name in the source module (or 'default')
+}
+
 export interface FunctionInfo {
   name: string;
   type: 'function' | 'method' | 'class' | 'arrow';
@@ -5,14 +10,14 @@ export interface FunctionInfo {
   startLine: number;
   endLine: number;
   calls: string[]; // Names of functions this function calls
-  imports: Map<string, string>; // imported name -> source file
-  scope: string; // parent scope (e.g., 'MyClass.myMethod')
+  imports: Map<string, ImportInfo>; // local name -> { source, importedAs }
+  scope: string; // parent scope (e.g., 'MyClass')
 }
 
 export interface FileAnalysis {
   filePath: string;
   functions: Map<string, FunctionInfo>;
-  imports: Map<string, string>; // imported name -> source file
+  imports: Map<string, ImportInfo>; // local name -> { source, importedAs }
   exports: Set<string>; // exported function/class names
 }
 

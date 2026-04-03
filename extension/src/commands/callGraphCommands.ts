@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
 import { CallGraphAnalyzer } from '../analyzer/callGraphAnalyzer';
 import { AnalysisOptions, CallGraph } from '../analyzer/types';
 
@@ -73,6 +72,8 @@ export async function generateCallGraphFromSelection(): Promise<void> {
   }
 
   const functionName = document.getText(wordRange);
+  // 1-based line number to match the parser's loc output
+  const cursorLine = position.line + 1;
 
   await vscode.window.withProgress(
     {
@@ -88,6 +89,7 @@ export async function generateCallGraphFromSelection(): Promise<void> {
         const callGraph = await analyzer.generateCallGraph(
           document.uri.fsPath,
           functionName,
+          cursorLine,
           options
         );
 
@@ -101,7 +103,8 @@ export async function generateCallGraphFromSelection(): Promise<void> {
 
         progress.report({ increment: 20, message: 'Done!' });
       } catch (error) {
-        vscode.window.showErrorMessage(`Failed to generate call graph: ${error}`);
+        const message = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to generate call graph: ${message}`);
       }
     }
   );
@@ -183,7 +186,8 @@ export async function analyzeCodebase(): Promise<void> {
           `Analyzed ${callGraph.nodes.size} functions/classes`
         );
       } catch (error) {
-        vscode.window.showErrorMessage(`Failed to analyze codebase: ${error}`);
+        const message = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to analyze codebase: ${message}`);
       }
     }
   );
@@ -235,14 +239,14 @@ async function saveCGraphFile(
   workspaceRoot: string
 ): Promise<void> {
   const fileName = `${baseName}-callgraph.cgraph`;
-  const filePath = path.join(workspaceRoot, fileName);
+  const fileUri = vscode.Uri.file(path.join(workspaceRoot, fileName));
 
-  // Write the file
-  fs.writeFileSync(filePath, JSON.stringify(cgraph, null, 2), 'utf-8');
+  // Write via the VS Code workspace FS API (works in remote/virtual workspaces)
+  const encoded = new TextEncoder().encode(JSON.stringify(cgraph, null, 2));
+  await vscode.workspace.fs.writeFile(fileUri, encoded);
 
   // Open the file
-  const uri = vscode.Uri.file(filePath);
-  await vscode.commands.executeCommand('vscode.open', uri);
+  await vscode.commands.executeCommand('vscode.open', fileUri);
 
   vscode.window.showInformationMessage(`Created call graph: ${fileName}`);
 }

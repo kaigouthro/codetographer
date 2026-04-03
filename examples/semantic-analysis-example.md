@@ -159,11 +159,11 @@ const asyncFunc = async function() { };
 - Method calls: `obj.method()`
 - This calls: `this.method()`
 - Imported function calls: `importedFunc()`
-- Chained calls: `obj.method1().method2()`
 
 ## Limitations
 
 **Not currently supported:**
+- Chained calls: `obj.method1().method2()` (only the last method in a chain is tracked)
 - Dynamic function calls: `obj[functionName]()`
 - Callback references: `array.map(myFunc)` (sees the call to `map` but not `myFunc`)
 - Higher-order functions: Functions passed as arguments aren't fully traced

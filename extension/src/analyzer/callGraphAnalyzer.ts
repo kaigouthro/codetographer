@@ -4,7 +4,6 @@ import * as fs from 'fs';
 import { CodeParser } from './parser';
 import {
   FileAnalysis,
-  FunctionInfo,
   CallGraph,
   CallGraphNode,
   CallGraphEdge,
@@ -17,11 +16,15 @@ export class CallGraphAnalyzer {
   constructor(private workspaceRoot: string) {}
 
   /**
-   * Generate a call graph starting from a specific function
+   * Generate a call graph starting from a specific function.
+   * Falls back to line-number-based lookup when the bare name is not found,
+   * so class methods (stored as `ClassName.methodName`) can be resolved from
+   * a cursor position.
    */
   async generateCallGraph(
     startFilePath: string,
     startFunctionName: string,
+    startLine: number,
     options: AnalysisOptions
   ): Promise<CallGraph> {
     const graph: CallGraph = {
@@ -38,14 +41,33 @@ export class CallGraphAnalyzer {
       throw new Error(`Failed to parse file: ${startFilePath}`);
     }
 
-    // Find the starting function
-    const startFunc = startFile.functions.get(startFunctionName);
+    // Find the starting function: exact match first, then by cursor line,
+    // then by suffix (handles class methods when only the bare name is given).
+    let resolvedName = startFunctionName;
+    if (!startFile.functions.has(startFunctionName)) {
+      // Try to find by cursor position
+      const byLine = this.findFunctionByLine(startFile, startLine);
+      if (byLine) {
+        resolvedName = byLine;
+      } else {
+        // Try suffix match: `ClassName.methodName` ending with `.${startFunctionName}`
+        const suffix = `.${startFunctionName}`;
+        for (const key of startFile.functions.keys()) {
+          if (key.endsWith(suffix)) {
+            resolvedName = key;
+            break;
+          }
+        }
+      }
+    }
+
+    const startFunc = startFile.functions.get(resolvedName);
     if (!startFunc) {
-      throw new Error(`Function ${startFunctionName} not found in ${startFilePath}`);
+      throw new Error(`Function '${startFunctionName}' not found in ${startFilePath}`);
     }
 
     // Add starting node
-    const startNodeId = this.createNodeId(startFunc.filePath, startFunctionName);
+    const startNodeId = this.createNodeId(startFunc.filePath, resolvedName);
     graph.nodes.set(startNodeId, {
       id: startNodeId,
       name: startFunc.name,
@@ -79,15 +101,26 @@ export class CallGraphAnalyzer {
 
       // Process each function call
       for (const calledFuncName of funcInfo.calls) {
+        // Normalize `this.method` → `ClassName.method` so intra-class edges resolve.
+        const normalizedCallName = this.normalizeCall(calledFuncName, funcInfo.scope);
+
         // Check if this is an imported function
         let targetFile = filePath;
-        let targetFuncName = calledFuncName;
+        let targetFuncName = normalizedCallName;
 
-        if (funcInfo.imports.has(calledFuncName)) {
-          const importSource = funcInfo.imports.get(calledFuncName)!;
+        // Use the local (possibly aliased) name for import lookup
+        const localCallName = normalizedCallName.startsWith('this.')
+          ? normalizedCallName.slice(5)
+          : normalizedCallName;
 
-          // Skip node_modules if not included
-          if (!options.includeNodeModules && importSource.includes('node_modules')) {
+        if (funcInfo.imports.has(localCallName)) {
+          const importInfo = funcInfo.imports.get(localCallName)!;
+          const importSource = importInfo.source;
+
+          // Skip external (non-relative) package imports unless configured otherwise
+          const isExternal =
+            !importSource.startsWith('.') && !path.isAbsolute(importSource);
+          if (!options.includeNodeModules && isExternal) {
             continue;
           }
 
@@ -96,32 +129,39 @@ export class CallGraphAnalyzer {
           if (!resolvedPath) continue;
 
           targetFile = resolvedPath;
-          // For imports, we might need to find the actual exported function
           const targetFileAnalysis = await this.analyzeFile(
             path.join(this.workspaceRoot, resolvedPath)
           );
           if (!targetFileAnalysis) continue;
 
-          // Try to find the function in the target file
-          if (!targetFileAnalysis.functions.has(calledFuncName)) {
-            // If not found directly, it might be a default export or renamed
-            // For now, skip
+          // The function in the target module is exported under its original name
+          const exportedName = importInfo.importedAs;
+          if (exportedName === 'default') {
+            // Try to find the default export - first look for the local alias, then any default
+            if (!targetFileAnalysis.functions.has(localCallName)) {
+              continue;
+            }
+            targetFuncName = localCallName;
+          } else if (exportedName === '*') {
+            // Namespace import - skip for now
             continue;
+          } else {
+            if (!targetFileAnalysis.functions.has(exportedName)) {
+              continue;
+            }
+            targetFuncName = exportedName;
           }
         } else {
-          // Local function call - try to find it in the same file
-          const localFunc = fileAnalysis.functions.get(calledFuncName);
-          if (!localFunc) {
-            // Might be a method call on 'this' or a different scope
-            // Try to find with current scope
+          // Local function call - try exact match first
+          if (!fileAnalysis.functions.has(normalizedCallName)) {
+            // Try with current scope prefix (e.g., `ClassName.method`)
             const scopedName = funcInfo.scope
-              ? `${funcInfo.scope}.${calledFuncName}`
-              : calledFuncName;
-            const scopedFunc = fileAnalysis.functions.get(scopedName);
-            if (scopedFunc) {
+              ? `${funcInfo.scope}.${normalizedCallName}`
+              : normalizedCallName;
+            if (fileAnalysis.functions.has(scopedName)) {
               targetFuncName = scopedName;
             } else {
-              continue; // Function not found
+              continue; // Function not found locally
             }
           }
         }
@@ -129,7 +169,7 @@ export class CallGraphAnalyzer {
         const targetNodeId = this.createNodeId(targetFile, targetFuncName);
 
         // Add the called function as a node if not already added
-        if (!graph.nodes.has(targetNodeId)) {
+        if (!graph.nodes.has(targetNodeId) && graph.nodes.size < options.maxNodes) {
           const targetFileAnalysis = await this.analyzeFile(
             path.join(this.workspaceRoot, targetFile)
           );
@@ -168,7 +208,8 @@ export class CallGraphAnalyzer {
   }
 
   /**
-   * Analyze all files in the workspace and build a complete call graph
+   * Analyze all files in the workspace and build a complete call graph.
+   * Respects maxNodes to prevent unbounded graph growth on large codebases.
    */
   async analyzeCodebase(
     filePatterns: string[],
@@ -193,9 +234,11 @@ export class CallGraphAnalyzer {
       }
     }
 
-    // Build the graph
-    for (const [filePath, analysis] of fileAnalyses) {
+    // Build the graph, respecting maxNodes
+    outer: for (const [filePath, analysis] of fileAnalyses) {
       for (const [funcName, funcInfo] of analysis.functions) {
+        if (graph.nodes.size >= options.maxNodes) break outer;
+
         const nodeId = this.createNodeId(filePath, funcName);
 
         // Add node
@@ -210,21 +253,36 @@ export class CallGraphAnalyzer {
 
         // Add edges for function calls
         for (const calledFunc of funcInfo.calls) {
-          // Try to resolve the call
-          let targetFile = filePath;
-          let targetFuncName = calledFunc;
+          const normalizedCall = this.normalizeCall(calledFunc, funcInfo.scope);
+          const localCallName = normalizedCall.startsWith('this.')
+            ? normalizedCall.slice(5)
+            : normalizedCall;
 
-          if (funcInfo.imports.has(calledFunc)) {
-            const importSource = funcInfo.imports.get(calledFunc)!;
-            if (!options.includeNodeModules && importSource.includes('node_modules')) {
+          let targetFile = filePath;
+          let targetFuncName = normalizedCall;
+
+          if (funcInfo.imports.has(localCallName)) {
+            const importInfo = funcInfo.imports.get(localCallName)!;
+            const importSource = importInfo.source;
+
+            const isExternal =
+              !importSource.startsWith('.') && !path.isAbsolute(importSource);
+            if (!options.includeNodeModules && isExternal) {
               continue;
             }
 
             const resolvedPath = this.resolveImportPath(filePath, importSource);
-            if (resolvedPath && fileAnalyses.has(resolvedPath)) {
-              targetFile = resolvedPath;
-            } else {
+            if (!resolvedPath || !fileAnalyses.has(resolvedPath)) {
               continue;
+            }
+            targetFile = resolvedPath;
+            const exportedName = importInfo.importedAs;
+            if (exportedName === 'default') {
+              targetFuncName = localCallName;
+            } else if (exportedName === '*') {
+              continue;
+            } else {
+              targetFuncName = exportedName;
             }
           }
 
@@ -284,35 +342,73 @@ export class CallGraphAnalyzer {
   }
 
   /**
-   * Resolve an import path to an absolute file path
+   * Resolve an import path to a relative file path (relative to workspaceRoot).
+   * Only handles relative imports; absolute/package imports return null.
    */
   private resolveImportPath(fromFile: string, importPath: string): string | null {
-    // Handle relative imports
-    if (importPath.startsWith('.')) {
-      const fromDir = path.dirname(fromFile);
-      let resolved = path.join(fromDir, importPath);
+    // Only handle relative imports
+    if (!importPath.startsWith('.')) {
+      return null;
+    }
 
-      // Try common extensions
-      const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
-      for (const ext of ['', ...extensions]) {
-        const testPath = path.join(this.workspaceRoot, resolved + ext);
-        if (fs.existsSync(testPath)) {
-          return path.relative(this.workspaceRoot, testPath);
-        }
+    const fromDir = path.dirname(fromFile);
+    const resolved = path.join(fromDir, importPath);
+
+    // Try common extensions
+    const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+    for (const ext of ['', ...extensions]) {
+      const testPath = path.join(this.workspaceRoot, resolved + ext);
+      if (fs.existsSync(testPath)) {
+        return path.relative(this.workspaceRoot, testPath);
       }
+    }
 
-      // Try index files
-      for (const ext of extensions) {
-        const indexPath = path.join(this.workspaceRoot, resolved, `index${ext}`);
-        if (fs.existsSync(indexPath)) {
-          return path.relative(this.workspaceRoot, indexPath);
+    // Try index files
+    for (const ext of extensions) {
+      const indexPath = path.join(this.workspaceRoot, resolved, `index${ext}`);
+      if (fs.existsSync(indexPath)) {
+        return path.relative(this.workspaceRoot, indexPath);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Normalize a call expression name:
+   * - `this.method` → `Scope.method` when scope is known
+   * - Other forms are returned unchanged
+   */
+  private normalizeCall(callName: string, scope: string): string {
+    if (callName.startsWith('this.') && scope) {
+      return `${scope}.${callName.slice(5)}`;
+    }
+    return callName;
+  }
+
+  /**
+   * Find the innermost function/method whose line range contains `line`.
+   * Returns the map key (e.g. `ClassName.methodName`) or null.
+   */
+  private findFunctionByLine(
+    fileAnalysis: FileAnalysis,
+    line: number
+  ): string | null {
+    let bestKey: string | null = null;
+    let bestSize = Infinity;
+
+    for (const [key, info] of fileAnalysis.functions) {
+      if (info.type === 'class') continue; // Skip class nodes
+      if (info.startLine <= line && info.endLine >= line) {
+        const size = info.endLine - info.startLine;
+        if (size < bestSize) {
+          bestSize = size;
+          bestKey = key;
         }
       }
     }
 
-    // Handle node_modules or other absolute imports
-    // For now, we skip these unless they're in the workspace
-    return null;
+    return bestKey;
   }
 
   /**
@@ -326,8 +422,8 @@ export class CallGraphAnalyzer {
    * Parse a node ID back into file path and function name
    */
   private parseNodeId(nodeId: string): [string, string] {
-    const parts = nodeId.split('::');
-    return [parts[0], parts[1]];
+    const idx = nodeId.indexOf('::');
+    return [nodeId.slice(0, idx), nodeId.slice(idx + 2)];
   }
 
   /**

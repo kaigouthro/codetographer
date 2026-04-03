@@ -139,11 +139,11 @@ Available settings (search "Codetographer" in VS Code settings):
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `maxDepth` | 3 | Maximum depth for call graph traversal |
-| `maxNodes` | 50 | Maximum number of nodes in the graph |
-| `includeNodeModules` | false | Include calls to node_modules |
-| `filePatterns` | `**/*.{js,jsx,ts,tsx}` | Files to analyze |
-| `excludePatterns` | `**/node_modules/**`, etc. | Files to exclude |
+| `codetographer.analysis.maxDepth` | 3 | Maximum depth for call graph traversal |
+| `codetographer.analysis.maxNodes` | 50 | Maximum number of nodes in the graph |
+| `codetographer.analysis.includeNodeModules` | false | Include calls to node_modules |
+| `codetographer.analysis.filePatterns` | `**/*.{js,jsx,ts,tsx}` | Files to analyze |
+| `codetographer.analysis.excludePatterns` | `**/node_modules/**`, etc. | Files to exclude |
 
 ### Limitations
 

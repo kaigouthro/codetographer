@@ -3,7 +3,7 @@ import traverse, { NodePath } from '@babel/traverse';
 import * as t from '@babel/types';
 import * as fs from 'fs';
 import * as path from 'path';
-import { FileAnalysis, FunctionInfo } from './types';
+import { FileAnalysis, FunctionInfo, ImportInfo } from './types';
 
 export class CodeParser {
   /**
@@ -29,92 +29,99 @@ export class CodeParser {
       });
 
       const functions = new Map<string, FunctionInfo>();
-      const imports = new Map<string, string>();
+      const imports = new Map<string, ImportInfo>();
       const exports = new Set<string>();
 
-      // Track current scope for nested functions
-      let currentClass: string | null = null;
+      // Use a stack to correctly track nested class scopes
+      const classStack: string[] = [];
 
       traverse(ast, {
         // Track imports
-        ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
-          const source = path.node.source.value;
-          path.node.specifiers.forEach((spec) => {
+        ImportDeclaration(nodePath: NodePath<t.ImportDeclaration>) {
+          const source = nodePath.node.source.value;
+          nodePath.node.specifiers.forEach((spec) => {
             if (t.isImportSpecifier(spec) && t.isIdentifier(spec.imported)) {
-              imports.set(spec.local.name, source);
+              imports.set(spec.local.name, {
+                source,
+                importedAs: spec.imported.name,
+              });
             } else if (t.isImportDefaultSpecifier(spec)) {
-              imports.set(spec.local.name, source);
+              imports.set(spec.local.name, { source, importedAs: 'default' });
             } else if (t.isImportNamespaceSpecifier(spec)) {
-              imports.set(spec.local.name, source);
+              imports.set(spec.local.name, { source, importedAs: '*' });
             }
           });
         },
 
         // Track exports
-        ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
-          if (path.node.declaration) {
-            if (t.isFunctionDeclaration(path.node.declaration) && path.node.declaration.id) {
-              exports.add(path.node.declaration.id.name);
-            } else if (t.isClassDeclaration(path.node.declaration) && path.node.declaration.id) {
-              exports.add(path.node.declaration.id.name);
-            } else if (t.isVariableDeclaration(path.node.declaration)) {
-              path.node.declaration.declarations.forEach((decl) => {
+        ExportNamedDeclaration(nodePath: NodePath<t.ExportNamedDeclaration>) {
+          if (nodePath.node.declaration) {
+            if (t.isFunctionDeclaration(nodePath.node.declaration) && nodePath.node.declaration.id) {
+              exports.add(nodePath.node.declaration.id.name);
+            } else if (t.isClassDeclaration(nodePath.node.declaration) && nodePath.node.declaration.id) {
+              exports.add(nodePath.node.declaration.id.name);
+            } else if (t.isVariableDeclaration(nodePath.node.declaration)) {
+              nodePath.node.declaration.declarations.forEach((decl) => {
                 if (t.isIdentifier(decl.id)) {
                   exports.add(decl.id.name);
                 }
               });
             }
           }
-          path.node.specifiers?.forEach((spec) => {
+          nodePath.node.specifiers?.forEach((spec) => {
             if (t.isExportSpecifier(spec) && t.isIdentifier(spec.exported)) {
               exports.add(spec.exported.name);
             }
           });
         },
 
-        ExportDefaultDeclaration(path: NodePath<t.ExportDefaultDeclaration>) {
-          if (t.isFunctionDeclaration(path.node.declaration) && path.node.declaration.id) {
-            exports.add(path.node.declaration.id.name);
-          } else if (t.isClassDeclaration(path.node.declaration) && path.node.declaration.id) {
-            exports.add(path.node.declaration.id.name);
-          } else if (t.isIdentifier(path.node.declaration)) {
-            exports.add(path.node.declaration.name);
+        ExportDefaultDeclaration(nodePath: NodePath<t.ExportDefaultDeclaration>) {
+          if (t.isFunctionDeclaration(nodePath.node.declaration) && nodePath.node.declaration.id) {
+            exports.add(nodePath.node.declaration.id.name);
+          } else if (t.isClassDeclaration(nodePath.node.declaration) && nodePath.node.declaration.id) {
+            exports.add(nodePath.node.declaration.id.name);
+          } else if (t.isIdentifier(nodePath.node.declaration)) {
+            exports.add(nodePath.node.declaration.name);
           }
         },
 
-        // Track class declarations
-        ClassDeclaration(path: NodePath<t.ClassDeclaration>) {
-          if (!path.node.id) return;
+        // Track class declarations using enter/exit to correctly scope methods
+        ClassDeclaration: {
+          enter(nodePath: NodePath<t.ClassDeclaration>) {
+            if (!nodePath.node.id) return;
+            const className = nodePath.node.id.name;
+            const startLine = nodePath.node.loc?.start.line || 0;
+            const endLine = nodePath.node.loc?.end.line || 0;
 
-          const className = path.node.id.name;
-          const startLine = path.node.loc?.start.line || 0;
-          const endLine = path.node.loc?.end.line || 0;
+            classStack.push(className);
 
-          currentClass = className;
-
-          functions.set(className, {
-            name: className,
-            type: 'class',
-            filePath: relativePath,
-            startLine,
-            endLine,
-            calls: [],
-            imports: new Map(),
-            scope: '',
-          });
+            functions.set(className, {
+              name: className,
+              type: 'class',
+              filePath: relativePath,
+              startLine,
+              endLine,
+              calls: [],
+              imports: new Map(imports),
+              scope: '',
+            });
+          },
+          exit() {
+            classStack.pop();
+          },
         },
 
         // Track function declarations
-        FunctionDeclaration(path: NodePath<t.FunctionDeclaration>) {
-          if (!path.node.id) return;
+        FunctionDeclaration(nodePath: NodePath<t.FunctionDeclaration>) {
+          if (!nodePath.node.id) return;
 
-          const funcName = path.node.id.name;
-          const startLine = path.node.loc?.start.line || 0;
-          const endLine = path.node.loc?.end.line || 0;
+          const funcName = nodePath.node.id.name;
+          const startLine = nodePath.node.loc?.start.line || 0;
+          const endLine = nodePath.node.loc?.end.line || 0;
           const calls: string[] = [];
 
           // Find all function calls within this function
-          path.traverse({
+          nodePath.traverse({
             CallExpression(callPath: NodePath<t.CallExpression>) {
               const callee = callPath.node.callee;
               if (t.isIdentifier(callee)) {
@@ -126,7 +133,7 @@ export class CodeParser {
             },
           });
 
-          const scope = currentClass || '';
+          const scope = classStack[classStack.length - 1] || '';
           const fullName = scope ? `${scope}.${funcName}` : funcName;
 
           functions.set(fullName, {
@@ -142,19 +149,19 @@ export class CodeParser {
         },
 
         // Track arrow functions and function expressions assigned to variables
-        VariableDeclarator(path: NodePath<t.VariableDeclarator>) {
-          if (!t.isIdentifier(path.node.id)) return;
+        VariableDeclarator(nodePath: NodePath<t.VariableDeclarator>) {
+          if (!t.isIdentifier(nodePath.node.id)) return;
 
-          const varName = path.node.id.name;
-          const init = path.node.init;
+          const varName = nodePath.node.id.name;
+          const init = nodePath.node.init;
 
           if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
-            const startLine = path.node.loc?.start.line || 0;
-            const endLine = path.node.loc?.end.line || 0;
+            const startLine = nodePath.node.loc?.start.line || 0;
+            const endLine = nodePath.node.loc?.end.line || 0;
             const calls: string[] = [];
 
             // Find all function calls within this function
-            const functionPath = path.get('init') as NodePath;
+            const functionPath = nodePath.get('init') as NodePath;
             functionPath.traverse({
               CallExpression(callPath: NodePath<t.CallExpression>) {
                 const callee = callPath.node.callee;
@@ -167,7 +174,7 @@ export class CodeParser {
               },
             });
 
-            const scope = currentClass || '';
+            const scope = classStack[classStack.length - 1] || '';
             const fullName = scope ? `${scope}.${varName}` : varName;
 
             functions.set(fullName, {
@@ -184,18 +191,18 @@ export class CodeParser {
         },
 
         // Track class methods
-        ClassMethod(path: NodePath<t.ClassMethod>) {
-          if (!t.isIdentifier(path.node.key) && !t.isStringLiteral(path.node.key)) return;
+        ClassMethod(nodePath: NodePath<t.ClassMethod>) {
+          if (!t.isIdentifier(nodePath.node.key) && !t.isStringLiteral(nodePath.node.key)) return;
 
-          const methodName = t.isIdentifier(path.node.key)
-            ? path.node.key.name
-            : path.node.key.value;
-          const startLine = path.node.loc?.start.line || 0;
-          const endLine = path.node.loc?.end.line || 0;
+          const methodName = t.isIdentifier(nodePath.node.key)
+            ? nodePath.node.key.name
+            : nodePath.node.key.value;
+          const startLine = nodePath.node.loc?.start.line || 0;
+          const endLine = nodePath.node.loc?.end.line || 0;
           const calls: string[] = [];
 
           // Find all function calls within this method
-          path.traverse({
+          nodePath.traverse({
             CallExpression(callPath: NodePath<t.CallExpression>) {
               const callee = callPath.node.callee;
               if (t.isIdentifier(callee)) {
@@ -207,7 +214,7 @@ export class CodeParser {
             },
           });
 
-          const scope = currentClass || '';
+          const scope = classStack[classStack.length - 1] || '';
           const fullName = scope ? `${scope}.${methodName}` : methodName;
 
           functions.set(fullName, {
@@ -236,12 +243,14 @@ export class CodeParser {
   }
 
   /**
-   * Get the full name of a member expression (e.g., 'obj.method' or 'this.method')
+   * Get the full name of a member expression (e.g., 'obj.method' or 'this.method').
+   * Returns null for unresolvable expressions such as chained call results
+   * (e.g., `obj.method1().method2()`).
    */
   private static getMemberExpressionName(node: t.MemberExpression): string | null {
     const parts: string[] = [];
 
-    const traverse = (n: t.Expression | t.PrivateName): boolean => {
+    const walkMemberExpr = (n: t.Expression | t.PrivateName): boolean => {
       if (t.isIdentifier(n)) {
         parts.unshift(n.name);
         return true;
@@ -249,17 +258,20 @@ export class CodeParser {
         if (t.isIdentifier(n.property)) {
           parts.unshift(n.property.name);
         }
-        return traverse(n.object);
+        return walkMemberExpr(n.object);
       } else if (t.isThisExpression(n)) {
         parts.unshift('this');
         return true;
       }
+      // CallExpression objects (chained calls like obj.method1().method2()) are
+      // not supported - return false so the caller can skip them gracefully.
       return false;
     };
 
-    if (traverse(node)) {
+    if (walkMemberExpr(node)) {
       return parts.join('.');
     }
     return null;
   }
 }
+
